@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+
+  golang-cli-template:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.dev
+    tty: true
+    environment:
+      - CFG_SERVE_PUBLIC_PORT=8080
+      - CFG_SERVE_TRACING_URL=http://jaeger:14268/api/traces
+      # - CFG_PATH=/app/config.yml
+    volumes:
+        # Source code
+      - .:/app
+    ports:
+      - 8080:8080
+    restart: on-failure

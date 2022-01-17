@@ -1,52 +1,109 @@
 package cmd
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
 
-	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 
+	"github.com/creasty/defaults"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/charmixer/envconfig"
+	"github.com/charmixer/go-flags"
 )
 
-var verbose bool
+type App struct {
+	Description string `long:"app-description" description:"Description of application" default:"Gives a simple blueprint for creating new api's"`
 
-// rootCmd represents the base command when called without any subcommands
-var rootCmd = &cobra.Command{
-	Use:   "golang-cli-template",
-	Short: "Template cli",
-	Long:  `Template cli...`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Log struct {
+		Verbose bool   `long:"verbose" short:"v" description:"Verbose logging"`
+		Format  string `long:"log-format" description:"Logging format" choice:"json" choice:"plain"`
+	}
+
+	Version versionCmd `command:"version" description:"Prints the build information from the binary"`
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
+var Application App
+var parser = flags.NewParser(&Application, flags.HelpFlag|flags.PassDoubleDash)
+
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		log.Error().Err(err)
-		os.Exit(1)
+	_, err := parser.Execute()
+
+	if err != nil {
+		e := err.(*flags.Error)
+		if e.Type != flags.ErrCommandRequired && e.Type != flags.ErrHelp {
+			fmt.Printf("%s\n", e.Message)
+		}
+		parser.WriteHelp(os.Stdout)
 	}
+
+	os.Exit(0)
 }
 
 func init() {
-	cobra.OnInitialize(initLogging)
+	// 4. Priority: Defaults, used if nothing in the chain overwrites
+	parseDefaults(&Application)
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
+	// 3. Priority: Config file
+	parseYamlFile(os.Getenv("CFG_PATH"), &Application)
 
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
+	// 2. Priority: Environment
+	parseEnv("CFG", &Application)
+
+	// 1. Priority: Flags
+	parseFlags(&Application)
+
+	initLogging()
+}
+
+func parseYamlFile(file string, config *App) {
+	if file == "" {
+		return
+	}
+
+	yamlFile, err := ioutil.ReadFile(file)
+	if err != nil {
+		panic(err)
+	}
+	err = yaml.Unmarshal(yamlFile, config)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func parseEnv(prefix string, config *App) {
+	if err := envconfig.Process(prefix, config); err != nil {
+		panic(err)
+	}
+}
+
+func parseFlags(config *App) {
+	if err := parser.ParseFlags(); err != nil {
+		e := err.(*flags.Error)
+		if e.Type != flags.ErrCommandRequired && e.Type != flags.ErrHelp {
+			fmt.Printf("%s\n", e.Message)
+		}
+		parser.WriteHelp(os.Stdout)
+	}
+}
+
+func parseDefaults(config *App) {
+	if err := defaults.Set(config); err != nil {
+		panic(err)
+	}
 }
 
 func initLogging() {
-
-	if verbose {
+	if Application.Log.Verbose {
 		log.Logger = log.With().Caller().Logger()
 	}
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	if Application.Log.Format == "plain" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	zerolog.TimestampFieldName = "time"
@@ -54,7 +111,7 @@ func initLogging() {
 	zerolog.MessageFieldName = "msg"
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	if verbose {
+	if Application.Log.Verbose {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 }
